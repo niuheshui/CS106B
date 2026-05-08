@@ -13,7 +13,8 @@ CS106B Spring 2017 作业 - https://web.stanford.edu/class/archive/cs/cs106b/cs1
 
 
 
-参考
-
+参考:
+    - scl repo https://github.com/zelenski/stanford-cpp-library
+    - CS106.zip https://web.stanford.edu/dept/cs_edu/resources/qt/CS106.zip
     - qt creator 文档 https://doc.qt.io/qtcreator/
     - qmake 手册 https://doc.qt.io/qt-6/zh/qmake-manual.html
