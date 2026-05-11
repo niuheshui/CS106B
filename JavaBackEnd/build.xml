@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project name="JavaBackEnd" default="jar" basedir=".">
+
+    <!-- ===================== -->
+    <!-- 全局属性定义 -->
+    <!-- ===================== -->
+    <property name="src.dir" value="src"/>
+    <property name="res.dir" value="res"/>
+    <property name="lib.dir" value="lib"/>
+    <property name="build.dir" value="build"/>
+    <property name="classes.dir" value="${build.dir}/classes"/>
+    <property name="jar.dir" value="dist"/>
+    <property name="jar.name" value="spl.jar"/>
+    <property name="manifest.file" value="META-INF/MANIFEST.MF"/>
+
+    <!-- ===================== -->
+    <!-- 创建必要目录 -->
+    <!-- ===================== -->
+    <target name="init">
+        <mkdir dir="${classes.dir}"/>
+        <mkdir dir="${jar.dir}"/>
+    </target>
+
+    <!-- ===================== -->
+    <!-- 编译源代码 -->
+    <!-- ===================== -->
+    <target name="compile" depends="init">
+        <javac srcdir="${src.dir}"
+               destdir="${classes.dir}"
+               includeantruntime="false"
+            source="1.8" target="1.8">
+            <!-- 添加 lib 目录下的 jar 作为 classpath -->
+            <classpath>
+                <fileset dir="${lib.dir}" includes="**/*.jar"/>
+            </classpath>
+        </javac>
+
+        <!-- 复制资源文件到 classes 目录 -->
+        <copy todir="${classes.dir}">
+            <fileset dir="${res.dir}" />
+        </copy>
+    </target>
+
+    <!-- ===================== -->
+    <!-- 创建 JAR 文件 -->
+    <!-- ===================== -->
+    <target name="jar" depends="compile">
+        <jar destfile="${jar.dir}/${jar.name}"
+             basedir="${classes.dir}"
+             manifest="${manifest.file}">
+            <!-- 如果还有 META-INF 需要额外加入 -->
+            <!-- <fileset dir="META-INF" includes="**/*"/> -->
+            <!-- 递归解压 lib 目录下的所有 jar，然后打包进去 -->
+            <zipgroupfileset dir="${lib.dir}" includes="**/*.jar"/>
+            <fileset dir="${src.dir}" includes="**/*"/>
+        </jar>
+    </target>
+
+    <!-- ===================== -->
+    <!-- 清理生成的文件 -->
+    <!-- ===================== -->
+    <target name="clean">
+        <delete dir="${build.dir}"/>
+        <delete dir="${jar.dir}"/>
+    </target>
+</project>
