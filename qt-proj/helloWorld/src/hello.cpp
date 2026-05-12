@@ -6,9 +6,16 @@
 
 using namespace std;
 
+void f() {
+    Vector<int> v;
+    v.add(1);
+    v.add(2);
+    v.add(3);
+    v.add(3);
+    cout << v << endl;
+}
+
 int main() {
-    for (int i = 0; i < 10; i++) {
-        cout << "Hello, World!" << endl;
-    }
+    f();
     return 0;
 }
