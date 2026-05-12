@@ -4,6 +4,11 @@
  * This file exports several useful string functions that are not
  * included in the C++ string library.
  * 
+ * @version 2016/08/03
+ * - modified readGenericValue not to throw error() on parse failures
+ *   (needed to support idiomatic silent-failing >> operators)
+ * @version 2015/10/26
+ * - added charToInteger/integerToChar functions
  * @version 2015/08/02
  * - added htmlEncode/Decode functions (not 100% perfect but works for common cases)
  * @version 2014/10/19
@@ -30,6 +35,13 @@ std::string boolToString(bool b);
  * Returns the string "true" if b is nonzero, or "false" if b is 0.
  */
 std::string boolToString(int b);
+
+/*
+ * Returns an integer equivalent of the given numeric character.
+ * For example, charToInteger('3') returns the int 3.
+ * If the character is not '0' through '9', throws an error.
+ */
+int charToInteger(char c);
 
 /*
  * Returns a single-character string containing the given character.
@@ -78,6 +90,18 @@ std::string htmlDecode(const std::string& s);
  * "&lt;p class=&quot;abc&quot;&gt;I love you &amp; me&lt;/p&gt;".
  */
 std::string htmlEncode(const std::string& s);
+
+/*
+ * Function: integerToChar
+ * Usage: char ch = integerToChar(n);
+ * ----------------------------------
+ * Converts an integer into the corresponding numeric character.
+ * For example, calling <code>integerToChar(3)</code> returns
+ * the char <code>'3'</code>.
+ * If the given integer is not a single-digit number from 0-9 inclusive,
+ * throws an error.
+ */
+char integerToChar(int n);
 
 /*
  * Function: integerToString
@@ -340,7 +364,7 @@ void urlEncodeInPlace(std::string& str);
  * If not, readString reads characters up to any of the characters
  * in the string STRING_DELIMITERS in the implementation file.
  */
-void readQuotedString(std::istream& is, std::string& str);
+bool readQuotedString(std::istream& is, std::string& str, bool throwOnError = true);
 
 /*
  * Friend function: writeQuotedString
@@ -404,13 +428,13 @@ inline std::string genericValueToString(const std::string& value,
  * this function uses readQuotedString to read the value.
  */
 template <typename ValueType>
-void readGenericValue(std::istream& is, ValueType& value) {
-    is >> value;
+bool readGenericValue(std::istream& is, ValueType& value) {
+    return (bool) (is >> value);
 }
 
 template <>
-inline void readGenericValue(std::istream& is, std::string& value) {
-    readQuotedString(is, value);
+inline bool readGenericValue(std::istream& is, std::string& value) {
+    return readQuotedString(is, value, /* throwOnError */ false);
 }
 
 #endif

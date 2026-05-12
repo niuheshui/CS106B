@@ -3,6 +3,10 @@
  * ------------------
  * This file implements the ginteractors.h interface.
  * 
+ * @version 2016/07/07
+ * - added getText method to GButton, GCheckBox, GRadioButton
+ * @version 2015/12/01
+ * - added GInteractor::setBackground
  * @version 2015/07/05
  * - removed static global Platform variable, replaced by getPlatform as needed
  * @version 2015/06/20
@@ -67,6 +71,15 @@ bool GInteractor::isEnabled() {
     return getPlatform()->ginteractor_isEnabled(this);
 }
 
+void GInteractor::setBackground(int rgb) {
+    std::string color = convertRGBToColor(rgb);
+    getPlatform()->ginteractor_setBackground(this, color);
+}
+
+void GInteractor::setBackground(std::string color) {
+    getPlatform()->ginteractor_setBackground(this, color);
+}
+
 void GInteractor::setEnabled(bool value) {
     getPlatform()->ginteractor_setEnabled(this, value);
 }
@@ -94,6 +107,10 @@ GButton::GButton(std::string label) {
     getPlatform()->gbutton_constructor(this, label);
 }
 
+std::string GButton::getText() const {
+    return this->label;
+}
+
 std::string GButton::getType() const {
     return "GButton";
 }
@@ -112,6 +129,10 @@ std::string GButton::toString() const {
 GCheckBox::GCheckBox(std::string label) {
     this->label = label;
     getPlatform()->gcheckbox_constructor(this, label);
+}
+
+std::string GCheckBox::getText() const {
+    return this->label;
 }
 
 bool GCheckBox::isSelected() {
@@ -147,6 +168,10 @@ GRadioButton::GRadioButton(std::string label, std::string group, bool selected) 
     if (selected) {
         setSelected(true);
     }
+}
+
+std::string GRadioButton::getText() const {
+    return this->label;
 }
 
 bool GRadioButton::isSelected() {

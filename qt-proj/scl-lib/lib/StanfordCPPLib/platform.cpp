@@ -4,7 +4,21 @@
  * This file implements the platform interface by passing commands to
  * a Java back end that manages the display.
  * 
- * @version 2015/09/30
+ * @version 2016/08/02
+ * - added diffimage_compareImages method
+ * - added gwindow_saveCanvasPixels method
+ * @version 2016/07/22
+ * - fixed calls to exit(int) to explicitly call std::exit(int) to avoid conflicts
+ *   with autograder exit function meant to stop students from abusing exit(int)
+ * @version 2016/07/06
+ * - added functions for showing DiffImage window to compare graphical output
+ * @version 2016/03/16
+ * - added functions for HTTP server
+ * @version 2015/10/21
+ * - moved EchoingStreambuf to plainconsole.h/cpp facilitate in/output capture
+ * @version 2015/10/08
+ * - bug fixes for sending long strings through Java process pipe
+ * @version 2015/10/01
  * - fix to check JAVA_HOME environment variable to force Java executable path
  *   (improved compatibility on Windows systems with many JDKs/JREs installed)
  * @version 2015/08/05
@@ -50,7 +64,7 @@
 #  undef KEY_EVENT
 #  undef MOUSE_MOVED
 #  undef HELP_KEY
-#else
+#else // _WIN32
 #  include <sys/types.h>
 #  include <sys/stat.h>
 #  include <sys/resource.h>
@@ -62,7 +76,7 @@
 static bool tracePipe;
 static int pin;
 static int pout;
-#endif
+#endif // _WIN32
 
 #include "platform.h"
 #include <algorithm>
@@ -86,6 +100,7 @@ static int pout;
 #include "gtimer.h"
 #include "gtypes.h"
 #include "hashmap.h"
+#include "plainconsole.h"
 #include "queue.h"
 #include "stack.h"
 #include "strlib.h"
@@ -105,6 +120,7 @@ static void endLineConsole(bool isStderr = false);
 static void echoConsole(const std::string& str, bool isStderr = false);
 static int scanInt(TokenScanner& scanner);
 static double scanDouble(TokenScanner& scanner);
+static int scanChar(TokenScanner& scanner);
 static GDimension scanDimension(const std::string& str);
 static Point scanPoint(const std::string& str);
 static GRectangle scanRectangle(const std::string& str);
@@ -256,136 +272,6 @@ public:
     }
 };
 
-/*
- * A stream buffer that just forwards everything to a delegate,
- * but echoes any user input read from it.
- * Used to (sometimes) echo console input when redirected in from a file.
- * http://www.cplusplus.com/reference/streambuf/streambuf/
- */
-class EchoingStreambuf : public std::streambuf {
-private:
-    /* Constants */
-    static const int BUFFER_SIZE = 4096;
-
-    /* Instance variables */
-    char inBuffer[BUFFER_SIZE];
-    char outBuffer[BUFFER_SIZE];
-    std::istream instream;
-    int outputLimit;
-    int outputPrinted;
-
-public:
-    EchoingStreambuf(std::streambuf& buf)
-            : instream(&buf),
-              outputLimit(0),
-              outputPrinted(0) {
-        // outstream.rdbuf(&buf);
-        setg(inBuffer, inBuffer, inBuffer);
-        setp(outBuffer, outBuffer + BUFFER_SIZE);
-    }
-
-    ~EchoingStreambuf() {
-        /* Empty */
-    }
-    
-    virtual void setOutputLimit(int limit) {
-        outputLimit = limit;
-    }
-
-    virtual int underflow() {
-        // Allow long strings at some point
-        std::string line;
-        getline(instream, line);
-        
-        // echo the line just read
-        // std::cout << line << std::endl;
-        // outputPrinted += line.length();
-        // if (outputLimit > 0 && outputPrinted > outputLimit) {
-        //     error("excessive output printed");
-        // }
-        
-        int n = line.length();
-        if (n + 1 >= BUFFER_SIZE) {
-            error("EchoingStreambuf::underflow: String too long");
-        }
-        for (int i = 0; i < n; i++) {
-            inBuffer[i] = line[i];
-        }
-        inBuffer[n++] = '\n';
-        inBuffer[n] = '\0';
-        setg(inBuffer, inBuffer, inBuffer + n);
-        return inBuffer[0];
-    }
-
-    virtual int overflow(int ch = EOF) {
-        std::string line = "";
-        for (char *cp = pbase(); cp < pptr(); cp++) {
-            if (*cp == '\n') {
-                // puts(line.c_str());
-                outputPrinted += line.length();
-                if (outputLimit > 0 && outputPrinted > outputLimit) {
-                    error("excessive output printed");
-                }
-                line = "";
-            } else {
-                line += *cp;
-            }
-        }
-        if (line != "") {
-            // puts(line.c_str());
-            outputPrinted += line.length();
-            if (outputLimit > 0 && outputPrinted > outputLimit) {
-                error("excessive output printed");
-            }
-        }
-        setp(outBuffer, outBuffer + BUFFER_SIZE);
-        if (ch != EOF) {
-            outBuffer[0] = ch;
-            pbump(1);
-        }
-        return ch != EOF;
-    }
-    
-    virtual int sync() {
-        return overflow();
-    }
-};
-
-/*
- * A stream buffer that limits how many characters you can print to it.
- * If you exceed that many, it throws an ErrorException.
- */
-class LimitedStreambuf : public std::streambuf {
-private:
-    std::ostream outstream;
-    int outputLimit;
-    int outputPrinted;
-
-public:
-    LimitedStreambuf(std::streambuf& buf, int limit)
-            : outstream(&buf),
-              outputLimit(limit),
-              outputPrinted(0) {
-        setp(0, 0);   // // no buffering, overflow on every char
-    }
-
-    virtual void setOutputLimit(int limit) {
-        outputLimit = limit;
-    }
-
-    virtual int overflow(int ch = EOF) {
-        outputPrinted++;
-        if (outputLimit > 0 && outputPrinted > outputLimit) {
-            // error("excessive output printed");
-            // outstream.setstate(std::ios::failbit | std::ios::badbit | std::ios::eofbit);
-            raise(SIGABRT);   // kill the program
-        } else {
-            outstream.put(ch);
-        }
-        return ch;
-    }
-};
-
 /* Private data */
 
 static Queue<GEvent> eventQueue;
@@ -395,17 +281,17 @@ static HashMap<std::string, GObject*> sourceTable;
 static HashMap<std::string, std::string> optionTable;
 static std::string programName;
 static std::ofstream logfile;
-static ConsoleStreambuf* cinout_new_buf;
+static ConsoleStreambuf* cinout_new_buf = NULL;
 
 #ifdef _WIN32
 static HANDLE rdFromJBE = NULL;
 static HANDLE wrFromJBE = NULL;
 static HANDLE rdToJBE = NULL;
 static HANDLE wrToJBE = NULL;
-#else
+#else // _WIN32
 static pid_t cppLibPid;
 static pid_t javaBackEndPid;
-#endif
+#endif // _WIN32
 
 /* Prototypes */
 
@@ -419,6 +305,8 @@ static void getStatus();
 static GEvent parseEvent(std::string line);
 static GEvent parseMouseEvent(TokenScanner& scanner, EventType type);
 static GEvent parseKeyEvent(TokenScanner& scanner, EventType type);
+static GEvent parseServerEvent(TokenScanner& scanner, EventType type);
+static GEvent parseTableEvent(TokenScanner& scanner, EventType type);
 static GEvent parseTimerEvent(TokenScanner& scanner, EventType type);
 static GEvent parseWindowEvent(TokenScanner& scanner, EventType type);
 static GEvent parseActionEvent(TokenScanner& scanner, EventType type);
@@ -437,29 +325,34 @@ Platform::~Platform() {
 
 #ifndef _WIN32
 
+// Unix implementation; see Windows implementation elsewhere in this file
 bool Platform::filelib_fileExists(std::string filename) {
     struct stat fileInfo;
     return stat(filename.c_str(), &fileInfo) == 0;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 bool Platform::filelib_isFile(std::string filename) {
     struct stat fileInfo;
     if (stat(filename.c_str(), &fileInfo) != 0) return false;
     return S_ISREG(fileInfo.st_mode) != 0;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 bool Platform::filelib_isSymbolicLink(std::string filename) {
     struct stat fileInfo;
     if (stat(filename.c_str(), &fileInfo) != 0) return false;
     return S_ISLNK(fileInfo.st_mode) != 0;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 bool Platform::filelib_isDirectory(std::string filename) {
     struct stat fileInfo;
     if (stat(filename.c_str(), &fileInfo) != 0) return false;
     return S_ISDIR(fileInfo.st_mode) != 0;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 void Platform::filelib_setCurrentDirectory(std::string path) {
     if (chdir(path.c_str()) == 0) {
         std::string msg = "setCurrentDirectory: ";
@@ -468,6 +361,7 @@ void Platform::filelib_setCurrentDirectory(std::string path) {
     }
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 std::string Platform::filelib_getCurrentDirectory() {
     char *cwd = getcwd(NULL, 0);
     if (cwd == NULL) {
@@ -482,6 +376,7 @@ std::string Platform::filelib_getCurrentDirectory() {
     }
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 // http://stackoverflow.com/questions/8087805/
 // how-to-get-system-or-user-temp-folder-in-unix-and-windows
 std::string Platform::filelib_getTempDirectory() {
@@ -493,6 +388,7 @@ std::string Platform::filelib_getTempDirectory() {
     return dir;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 void Platform::filelib_createDirectory(std::string path) {
     if (endsWith(path, "/")) {
         path = path.substr(0, path.length() - 2);
@@ -505,14 +401,17 @@ void Platform::filelib_createDirectory(std::string path) {
     }
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 std::string Platform::filelib_getDirectoryPathSeparator() {
     return "/";
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 std::string Platform::filelib_getSearchPathSeparator() {
     return ":";
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 std::string Platform::filelib_expandPathname(std::string filename) {
     if (filename == "") return "";
     int len = filename.length();
@@ -544,6 +443,7 @@ std::string Platform::filelib_expandPathname(std::string filename) {
     return filename;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 void Platform::filelib_listDirectory(std::string path, std::vector<std::string>& list) {
     if (path == "") path = ".";
     DIR *dir = opendir(path.c_str());
@@ -559,60 +459,71 @@ void Platform::filelib_listDirectory(std::string path, std::vector<std::string>&
     sort(list.begin(), list.end());
 }
 
-#else
+#else // _WIN32
 
+// Windows implementation; see Unix implementation elsewhere in this file
 bool Platform::filelib_fileExists(std::string filename) {
     return GetFileAttributesA(filename.c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 bool Platform::filelib_isFile(std::string filename) {
     DWORD attr = GetFileAttributesA(filename.c_str());
     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_NORMAL);
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 bool Platform::filelib_isSymbolicLink(std::string filename) {
     DWORD attr = GetFileAttributesA(filename.c_str());
     return attr != INVALID_FILE_ATTRIBUTES
             && (attr & FILE_ATTRIBUTE_REPARSE_POINT);
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 bool Platform::filelib_isDirectory(std::string filename) {
     DWORD attr = GetFileAttributesA(filename.c_str());
     return attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 void Platform::filelib_setCurrentDirectory(std::string path) {
     if (!filelib_isDirectory(path) || !SetCurrentDirectoryA(path.c_str())) {
         error("setCurrentDirectory: Can't change to " + path);
     }
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 std::string Platform::filelib_getCurrentDirectory() {
     char path[MAX_PATH + 1];
     int n = GetCurrentDirectoryA(MAX_PATH + 1, path);
     return std::string(path, n);
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 std::string Platform::filelib_getTempDirectory() {
     char path[MAX_PATH + 1];
     int n = GetTempPathA(MAX_PATH + 1, path);
     return std::string(path, n);
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 void Platform::filelib_createDirectory(std::string path) {
     if (!CreateDirectoryA(path.c_str(), NULL)) {
         error("createDirectory: Can't create " + path);
     }
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 std::string Platform::filelib_getDirectoryPathSeparator() {
     return "\\";
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 std::string Platform::filelib_getSearchPathSeparator() {
     return ";";
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 std::string Platform::filelib_expandPathname(std::string filename) {
     if (filename == "") return "";
     int len = filename.length();
@@ -622,6 +533,7 @@ std::string Platform::filelib_expandPathname(std::string filename) {
     return filename;
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 void Platform::filelib_listDirectory(std::string path, std::vector<std::string> & list) {
     if (path == "") path = ".";
     std::string pattern = path + "\\*.*";
@@ -640,7 +552,7 @@ void Platform::filelib_listDirectory(std::string path, std::vector<std::string> 
     sort(list.begin(), list.end());
 }
 
-#endif
+#endif // _WIN32
 
 /*
  * This function increases the system stack size on Unixy platforms (Linux+Mac),
@@ -652,18 +564,18 @@ void Platform::filelib_listDirectory(std::string path, std::vector<std::string> 
 #ifdef _WIN32
     // Windows doesn't support this operation
 void Platform::setStackSize(unsigned int /* stackSize */) {
-#else
+#else // not _WIN32
 void Platform::setStackSize(unsigned int stackSize) {
     // Linux/Mac definition (they DO support stack size changing)
 #if defined(__USE_LARGEFILE64)
     // 64-bit version
     rlimit64 rl;
     int result = getrlimit64(RLIMIT_STACK, &rl);
-#else
+#else // not __USE_LARGEFILE64
     // 32-bit version
     rlimit rl;
     int result = getrlimit(RLIMIT_STACK, &rl);
-#endif
+#endif // __USE_LARGEFILE64
     if (result == 0) {
         if (rl.rlim_cur < stackSize || rl.rlim_max < stackSize) {
             rl.rlim_cur = (rlim_t) stackSize;
@@ -671,9 +583,9 @@ void Platform::setStackSize(unsigned int stackSize) {
 #if defined(__USE_LARGEFILE64)
             // 64-bit version
             result = setrlimit64(RLIMIT_STACK, &rl);
-#else
+#else // not __USE_LARGEFILE64
             result = setrlimit(RLIMIT_STACK, &rl);
-#endif
+#endif // __USE_LARGEFILE64
             if (result != 0) {
                 std::cerr << std::endl;
                 std::cerr << " ***" << std::endl;
@@ -849,6 +761,14 @@ void Platform::gwindow_repaint(const GWindow& gw) {
     putPipe(os.str());
 }
 
+void Platform::gwindow_saveCanvasPixels(const GWindow& gw, const std::string& filename) {
+    std::ostringstream os;
+    os << "GWindow.saveCanvasPixels(\"" << gw.gwd << "\",";
+    writeQuotedString(os, filename);
+    os << ")";
+    putPipe(os.str());
+}
+
 void Platform::gwindow_setSize(const GWindow& gw, int width, int height) {
     std::ostringstream os;
     os << "GWindow.setSize(\"" << gw.gwd << "\", " << width << ", " << height
@@ -958,6 +878,38 @@ void Platform::gtimer_stop(const GTimer& timer) {
     putPipe(os.str());
 }
 
+void Platform::httpserver_sendResponse(int requestID, int httpErrorCode, const std::string& contentType, const std::string& responseText) {
+    std::ostringstream os;
+    os << "HttpServer.sendResponse(" << requestID << "," << httpErrorCode << ",";
+    writeQuotedString(os, contentType);
+    os << ",";
+    writeQuotedString(os, responseText);
+    os << ")";
+    putPipe(os.str());
+}
+
+void Platform::httpserver_sendResponseFile(int requestID, const std::string& contentType, const std::string& responseFilePath) {
+    std::ostringstream os;
+    os << "HttpServer.sendResponseFile(" << requestID << ",";
+    writeQuotedString(os, contentType);
+    os << ",";
+    writeQuotedString(os, responseFilePath);
+    os << ")";
+    putPipe(os.str());
+}
+
+void Platform::httpserver_start(int port) {
+    std::ostringstream os;
+    os << "HttpServer.start(" << port << ")";
+    putPipe(os.str());
+}
+
+void Platform::httpserver_stop() {
+    std::ostringstream os;
+    os << "HttpServer.stop()";
+    putPipe(os.str());
+}
+
 void Platform::sound_constructor(Sound *sound, std::string filename) {
     std::ostringstream os;
     os << "Sound.create(\"" << sound << "\", ";
@@ -1023,7 +975,7 @@ void Platform::gwindow_setResizable(const GWindow& gw, bool value) {
     putPipe(os.str());
 }
 
-void Platform::gwindow_addToRegion(const GWindow& gw, GObject* gobj, std::string region) {
+void Platform::gwindow_addToRegion(const GWindow& gw, GObject* gobj, const std::string& region) {
     std::ostringstream os;
     os << "GWindow.addToRegion(\"" << gw.gwd << "\", \"" << gobj << "\", \""
        << region << "\")";
@@ -1339,6 +1291,38 @@ void Platform::garc_setSweepAngle(GObject* gobj, double angle) {
     putPipe(os.str());
 }
 
+void Platform::diffimage_compareImages(const std::string& file1, const std::string& file2, const std::string& outfile) {
+    std::ostringstream os;
+    os << "DiffImage.compareImages(";
+    writeQuotedString(os, file1);
+    os << ",";
+    writeQuotedString(os, file2);
+    os << ",";
+    writeQuotedString(os, outfile);
+    os << ")";
+    putPipe(os.str());
+}
+
+void Platform::diffimage_compareWindowToImage(const GWindow& gwindow, const std::string& file2) {
+    std::ostringstream os;
+    os << "DiffImage.compareWindowToImage(\"" << gwindow.gwd << "\", ";
+    writeQuotedString(os, file2);
+    os << ")";
+    putPipe(os.str());
+    getResult();   // read "ok"; modal dialog
+}
+
+void Platform::diffimage_show(const std::string& file1, const std::string& file2) {
+    std::ostringstream os;
+    os << "DiffImage.show(";
+    writeQuotedString(os, file1);
+    os << ", ";
+    writeQuotedString(os, file2);
+    os << ")";
+    putPipe(os.str());
+    getResult();   // read "ok"; modal dialog
+}
+
 void Platform::gbufferedimage_constructor(GObject* gobj, double x, double y,
                                           double width, double height, int rgb) {
     std::ostringstream os;
@@ -1399,9 +1383,7 @@ void Platform::gbufferedimage_setRGB(GObject* gobj, double x, double y,
 void Platform::gbufferedimage_updateAllPixels(GObject* gobj,
                                               const std::string& base64) {
     std::ostringstream os;
-    os << "GBufferedImage.updateAllPixels(\"" << gobj << "\", ";
-    writeQuotedString(os, base64);
-    os << ")";
+    os << "GBufferedImage.updateAllPixels(\"" << gobj << "\", \"" << base64 << "\")";
     putPipe(os.str());
 }
 
@@ -1442,6 +1424,12 @@ void Platform::ginteractor_setActionCommand(GObject* gobj, std::string cmd) {
     os << "GInteractor.setActionCommand(\"" << gobj << "\", ";
     writeQuotedString(os, cmd);
     os << ")";
+    putPipe(os.str());
+}
+
+void Platform::ginteractor_setBackground(GObject* gobj, std::string color) {
+    std::ostringstream os;
+    os << "GInteractor.setBackground(\"" << gobj << "\", \"" << color << "\")";
     putPipe(os.str());
 }
 
@@ -1603,6 +1591,100 @@ void Platform::gslider_setValue(GObject* gobj, int value) {
     putPipe(os.str());
 }
 
+void Platform::gtable_clear(GObject* gobj) {
+    std::ostringstream os;
+    os << "GTable.clear(\"" << gobj << "\")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_constructor(GObject* gobj, int numRows, int numCols,
+                                  double x, double y, double width, double height) {
+    std::ostringstream os;
+    os << gobj;
+    sourceTable.put(os.str(), gobj);
+    os.str("");
+    os << "GTable.create(\"" << gobj << "\", " << numRows << ", " << numCols
+       << ", " << x << ", " << y << ", " << width << ", " << height << ")";
+    putPipe(os.str());
+}
+
+std::string Platform::gtable_get(const GObject * gobj, int row, int column) {
+    std::ostringstream os;
+    os << "GTable.get(\"" << gobj << "\", " << row << ", " << column << ")";
+    putPipe(os.str());
+    return getResult();
+}
+
+int Platform::gtable_getColumnWidth(const GObject* gobj, int column) {
+    std::ostringstream os;
+    os << "GTable.getColumnWidth(\"" << gobj << "\", " << column << ")";
+    putPipe(os.str());
+    return stringToInteger(getResult());
+}
+
+void Platform::gtable_getSelection(const GObject* gobj, int& row, int& column) {
+    std::ostringstream os;
+    os << "GTable.getSelection(\"" << gobj << "\")";
+    putPipe(os.str());
+    row = stringToInteger(getResult());
+    column = stringToInteger(getResult());
+}
+
+void Platform::gtable_resize(GObject* gobj, int numRows, int numCols) {
+    std::ostringstream os;
+    os << "GTable.resize(\"" << gobj << "\", " << numRows << ", " << numCols << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_select(GObject* gobj, int row, int column) {
+    std::ostringstream os;
+    os << "GTable.select(\"" << gobj << "\", " << row << ", " << column << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_set(GObject* gobj, int row, int column, const std::string& value) {
+    std::ostringstream os;
+    os << "GTable.set(\"" << gobj << "\", " << row << ", " << column << ", ";
+    writeQuotedString(os, value);
+    os << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_setColumnWidth(GObject* gobj, int column, int width) {
+    std::ostringstream os;
+    os << "GTable.setColumnWidth(\"" << gobj << "\", " << column << ", " << width << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_setEditable(GObject* gobj, bool editable) {
+    std::ostringstream os;
+    os << "GTable.setEditable(\"" << gobj << "\", " << std::boolalpha << editable << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_setEventEnabled(GObject* gobj, int type, bool enabled) {
+    std::ostringstream os;
+    os << "GTable.setEventEnabled(\"" << gobj << "\", " << type
+       << ", " << std::boolalpha << enabled << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_setFont(GObject* gobj, const std::string& font) {
+    std::ostringstream os;
+    os << "GTable.setFont(\"" << gobj << "\", ";
+    writeQuotedString(os, font);
+    os << ")";
+    putPipe(os.str());
+}
+
+void Platform::gtable_setHorizontalAlignment(GObject* gobj, const std::string& alignment) {
+    std::ostringstream os;
+    os << "GTable.setHorizontalAlignment(\"" << gobj << "\", ";
+    writeQuotedString(os, alignment);
+    os << ")";
+    putPipe(os.str());
+}
+
 void Platform::gtextfield_constructor(GObject* gobj, int nChars) {
     std::ostringstream os;
     os << gobj;
@@ -1735,7 +1817,7 @@ GEvent Platform::gevent_waitForEvent(int mask) {
     GEvent event = eventQueue.dequeue();
 #ifdef PIPE_DEBUG
     fprintf(stderr, "Platform::waitForEvent returning event \"%s\"\n", event.toString().c_str());  fflush(stderr);
-#endif
+#endif // PIPE_DEBUG
     return event;
 }
 
@@ -1747,10 +1829,10 @@ void Platform::gwindow_exitGraphics(bool abortBlockedConsoleIO) {
     if (abortBlockedConsoleIO && jbeconsole_isBlocked()) {
         // graphical console is blocked waiting for an I/O read;
         // won't be able to exit graphics in the JBE anyway; just exit
-        exit(0);
+        std::exit(0);
     } else {
         putPipe("GWindow.exitGraphics()");
-        exit(0);
+        std::exit(0);
     }
 }
 
@@ -1872,6 +1954,7 @@ static void putPipeLongString(std::string line) {
 /* Windows implementation of interface to Java back end */
 
 // formats an error message using Windows lookup of error codes and strings
+// Windows implementation; see Unix implementation elsewhere in this file
 static WINBOOL WinCheck(WINBOOL result) {
     if (result == 0 && result != ERROR_IO_PENDING) {
         // failure; Windows error codes: http://msdn.microsoft.com/en-us/library/windows/desktop/ms681381(v=vs.85).aspx
@@ -1899,13 +1982,14 @@ static WINBOOL WinCheck(WINBOOL result) {
     return result;
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 int startupMain(int argc, char **argv) {
     startupMainDontRunMain(argc, argv);
 
 #ifndef SPL_AUTOGRADER_MODE
     extern int Main(int argc, char **argv);
     return Main(argc, argv);
-#else
+#else // SPL_AUTOGRADER_MODE
     return 0;
 #endif // SPL_AUTOGRADER_MODE
 }
@@ -1914,6 +1998,7 @@ int startupMain(int argc, char **argv) {
  * This is a version of startupMain that does all of the setup but then does
  * not actually run startupMain.
  * This is used to facilitate the creation of autograder programs.
+ * Windows implementation; see Unix implementation elsewhere in this file
  */
 void startupMainDontRunMain(int /*argc*/, char** argv) {
     exceptions::setProgramNameForStackTrace(argv[0]);
@@ -1929,6 +2014,7 @@ void startupMainDontRunMain(int /*argc*/, char** argv) {
     setConsoleProperties();
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 static void initPipe() {
     SECURITY_ATTRIBUTES attr;
     attr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -1949,7 +2035,7 @@ static void initPipe() {
     std::string cmd = getJavaCommand();
 #ifdef PIPE_DEBUG
     cmd += " -Dstanfordspl.debug=true";
-#endif
+#endif // PIPE_DEBUG
     cmd += " -jar spl.jar";
     cmd += std::string(" ") + programName;
     int n = cmd.length();
@@ -1987,6 +2073,7 @@ static void initPipe() {
     }
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 static void putPipe(std::string line) {
     if (line.length() > PIPE_MAX_COMMAND_LENGTH) {
         putPipeLongString(line);
@@ -1996,18 +2083,19 @@ static void putPipe(std::string line) {
     DWORD nch;
 #ifdef PIPE_DEBUG
     fprintf(stderr, "putPipe(\"%s\")\n", line.c_str());  fflush(stderr);
-#endif
+#endif // PIPE_DEBUG
     if (!WinCheck(WriteFile(wrToJBE, line.c_str(), line.length(), &nch, NULL))) return;
     if (!WinCheck(WriteFile(wrToJBE, "\n", 1, &nch, NULL))) return;
     WinCheck(FlushFileBuffers(wrToJBE));
 }
 
+// Windows implementation; see Unix implementation elsewhere in this file
 static std::string getPipe() {
     std::string line = "";
     DWORD nch;
 #ifdef PIPE_DEBUG
     fprintf(stderr, "getPipe(): waiting ...\n");  fflush(stderr);
-#endif
+#endif // PIPE_DEBUG
 
     int charsRead = 0;
     int charsReadMax = 1024*1024;
@@ -2034,6 +2122,7 @@ static std::string getPipe() {
 
 /* Linux/Mac implementation of interface to Java back end */
 
+// Unix implementation; see Windows implementation elsewhere in this file
 static bool LinCheck(ssize_t result) {
     if (result == EPIPE) {
         // fputs("Error from Java back-end subprocess.\n", stderr);
@@ -2044,6 +2133,7 @@ static bool LinCheck(ssize_t result) {
     }
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 static void scanOptions() {
     char *home = getenv("HOME");
     if (home != NULL) {
@@ -2064,12 +2154,14 @@ static void scanOptions() {
     }
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 static std::string getOption(std::string key) {
     char *str = getenv(key.c_str());
     if (str != NULL) return std::string(str);
     return optionTable.get(key);
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 #ifdef SPL_AUTOGRADER_MODE
 int startupMain(int /*argc*/, char** argv) {
 #else // not SPL_AUTOGRADER_MODE
@@ -2123,6 +2215,7 @@ int startupMain(int argc, char **argv) {
  * This is a version of startupMain that does all of the setup but then does
  * not actually run startupMain.
  * This is used to facilitate the creation of autograder programs.
+ * Unix implementation; see Windows implementation elsewhere in this file
  */
 void startupMainDontRunMain(int /*argc*/, char** argv) {
     std::string arg0 = argv[0];
@@ -2155,13 +2248,9 @@ void startupMainDontRunMain(int /*argc*/, char** argv) {
     
 #ifdef SPL_ECHO_PLAIN_CONSOLE
     // echo user input pulled from cin
-    EchoingStreambuf* echobufIn = new EchoingStreambuf(*std::cin.rdbuf());
-    std::cin.rdbuf(echobufIn);
+    plainconsole::setEcho(true);
 #ifdef SPL_CONSOLE_OUTPUT_LIMIT
-    LimitedStreambuf* limitedbufOut = new LimitedStreambuf(*std::cout.rdbuf(), SPL_CONSOLE_OUTPUT_LIMIT);
-    LimitedStreambuf* limitedbufErr = new LimitedStreambuf(*std::cerr.rdbuf(), SPL_CONSOLE_OUTPUT_LIMIT);
-    std::cout.rdbuf(limitedbufOut);
-    std::cerr.rdbuf(limitedbufErr);
+    plainconsole::setOutputLimit(SPL_CONSOLE_OUTPUT_LIMIT);
 #endif // SPL_CONSOLE_OUTPUT_LIMIT
 #endif // SPL_ECHO_PLAIN_CONSOLE
     
@@ -2169,6 +2258,7 @@ void startupMainDontRunMain(int /*argc*/, char** argv) {
 }
 
 #ifndef SPL_HEADLESS_MODE
+// Unix implementation; see Windows implementation elsewhere in this file
 static void sigPipeHandler(int /*signum*/) {
     // use stderr directly rather than cerr because graphical console may be unreachable
     fputs("***\n", stderr);
@@ -2176,10 +2266,11 @@ static void sigPipeHandler(int /*signum*/) {
     fputs("*** Prematurely exiting program because console window was closed.\n", stderr);
     fputs("***\n", stderr);
     fflush(stderr);
-    exit(1);
+    std::exit(1);
 }
 #endif // SPL_HEADLESS_MODE
 
+// Unix implementation; see Windows implementation elsewhere in this file
 static void initPipe() {
     char *trace = getenv("JBETRACE");
     logfile.open("/dev/tty");
@@ -2219,7 +2310,7 @@ static void initPipe() {
         fputs(("*** " + splHomeDir + "\n").c_str(), stderr);
         fputs("***\n", stderr);
         fflush(stderr);
-        exit(1);
+        std::exit(1);
     }
     
     int toJBE[2], fromJBE[2];
@@ -2240,34 +2331,53 @@ static void initPipe() {
         close(fromJBE[0]);
         close(fromJBE[1]);
         std::string javaCommand = getJavaCommand();
-        
+        std::string jdwp = "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:9778";
+
 #ifdef __APPLE__
-        std::string option = "-Xdock:name=" + programName;
-        execlp(javaCommand.c_str(), javaCommand.c_str(), option.c_str(), "-jar", jarName.c_str(),
-               programName.c_str(), NULL);
+        std::string option = "-Xdock:name=" + programName;  
+                    ;
+        std::string fullCommand = javaCommand + " " + option + " -jar " + jarName + " " + programName;
+        int execlpResult = execlp(javaCommand.c_str(), 
+                javaCommand.c_str(), 
+                option.c_str(),
+                "-jar", 
+                jarName.c_str(),
+                programName.c_str(), 
+                NULL);
 #else // !APPLE
 #ifdef SPL_HEADLESS_MODE
-        execlp(javaCommand.c_str(), javaCommand.c_str(), "-Djava.awt.headless=true", "-jar", jarName.c_str(), programName.c_str(), NULL);
+        int execlpResult = execlp(javaCommand.c_str(), javaCommand.c_str(), "-Djava.awt.headless=true", "-jar", jarName.c_str(), programName.c_str(), NULL);
+        std::string fullCommand = javaCommand + " -jar " + jarName + " " + programName;
 #else // !SPL_HEADLESS_MODE
-        execlp(javaCommand.c_str(), javaCommand.c_str(), "-jar", jarName.c_str(), programName.c_str(), NULL);
+        int execlpResult = execlp(javaCommand.c_str(), javaCommand.c_str(), "-jar", jarName.c_str(), programName.c_str(), NULL);
+        std::string fullCommand = javaCommand + " -Djava.awt.headless=true -jar " + jarName + " " + programName;
 #endif // SPL_HEADLESS_MODE
 #endif // APPLE
         
         // if we get here, the execlp call failed, so show error message
         // use stderr directly rather than cerr because graphical console is unreachable
-        char* lastError = strerror(errno);
-        
-        fputs("\n", stderr);
-        fputs("***\n", stderr);
-        fputs("*** STANFORD C++ LIBRARY ERROR:\n", stderr);
-        fputs("*** Unable to connect to Java back-end\n", stderr);
-        fputs("*** to launch 'spl.jar' command.\n", stderr);
-        fputs("*** Please check your Java installation and make sure\n", stderr);
-        fputs("*** that spl.jar is properly attached to your project.\n", stderr);
-        fputs("***\n", stderr);
-        fputs((std::string("*** Error was: ") + lastError).c_str(), stderr);
-        fflush(stderr);
-        error("Could not exec spl.jar");
+#ifndef SPL_HEADLESS_MODE
+        if (execlpResult != 0) {
+            char* lastError = strerror(errno);
+            std::string workingDir = getCurrentDirectory();
+            
+            fputs("\n", stderr);
+            fputs("***\n", stderr);
+            fputs("*** STANFORD C++ LIBRARY ERROR:\n", stderr);
+            fputs("*** Unable to launch process to connect to Java back-end\n", stderr);
+            fputs("*** using the 'spl.jar' library.\n", stderr);
+            fputs("*** Please check your Java installation and make sure\n", stderr);
+            fputs("*** that spl.jar is properly attached to your project.\n", stderr);
+            fputs("***\n", stderr);
+            fputs(("*** Command was: " + fullCommand + "\n").c_str(), stderr);
+            fputs(("*** Working dir: " + workingDir + "\n").c_str(), stderr);
+            fputs(("***  Result was: " + integerToString(execlpResult) + "\n").c_str(), stderr);
+            fputs((std::string("***   Error was: ") + lastError + std::string("\n")).c_str(), stderr);
+            fputs("***\n", stderr);
+            fflush(stderr);
+            std::exit(1);
+        }
+#endif // SPL_HEADLESS_MODE
     } else {
         // we are the C++ process; connect pipe input/output
         cppLibPid = getpid();
@@ -2283,6 +2393,7 @@ static void initPipe() {
     }
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 static void putPipe(std::string line) {
     if (line.length() > PIPE_MAX_COMMAND_LENGTH) {
         putPipeLongString(line);
@@ -2296,6 +2407,7 @@ static void putPipe(std::string line) {
     if (tracePipe) logfile << "-> " << line << std::endl;
 }
 
+// Unix implementation; see Windows implementation elsewhere in this file
 static std::string getPipe() {
 #ifdef PIPE_DEBUG
     fprintf(stderr, "getPipe(): waiting ...\n");  fflush(stderr);
@@ -2310,7 +2422,9 @@ static std::string getPipe() {
             throw InterruptedIOException();
             // break;   // failed to read from subprocess
         }
-        if (ch == '\n') break;
+        if (ch == '\n') {
+            break;
+        }
         line += ch;
         charsRead++;
     }
@@ -2329,17 +2443,39 @@ static std::string getResult(bool consumeAcks, const std::string& caller) {
         fprintf(stderr, "getResult(): calling getPipe() ...\n");  fflush(stderr);
 #endif
         std::string line = getPipe();
-        bool isResult = startsWith(line, "result:");
-        bool isResultLong = startsWith(line, "result_long:");
-        bool isEvent  = startsWith(line, "event:");
-        bool isAck    = startsWith(line, "result:___jbe___ack___");
+        
+        bool isResult        = startsWith(line, "result:");
+        bool isResultLong    = startsWith(line, "result_long:");
+        bool isEvent         = startsWith(line, "event:");
+        bool isAck           = startsWith(line, "result:___jbe___ack___");
         bool hasACMException = line.find("acm.util.ErrorException") != std::string::npos;
         bool hasException    = line.find("xception") != std::string::npos;
         bool hasError        = line.find("Unexpected error") != std::string::npos;
 
-        // added by Marty: if there is a back-end error, display it
-        if (((isResult || isEvent) && hasACMException) ||
+        if (isResultLong) {
+            // read a 'long' result (sent across multiple lines)
+            std::ostringstream os;
+            std::string nextLine = getPipe();
+            while (nextLine != "result_long:end") {
+                if (!startsWith(line, "result:___jbe___ack___")) {
+                    os << nextLine;
+#ifdef PIPE_DEBUG
+                    fprintf(stderr, "getResult(): appended line (length so far: %ld)\n", os.str().length());  fflush(stderr);
+#endif
+                }
+                nextLine = getPipe();
+            }
+            std::string result = os.str();
+#ifdef PIPE_DEBUG
+            fprintf(stderr, "getResult(): returning long string \"%s ... %s\" (length %ld)\n",
+                    result.substr(0, 10).c_str(),
+                    result.substr(result.length() - 10, 10).c_str(),
+                    result.length());  fflush(stderr);
+#endif
+            return result;
+        } else if (((isResult || isEvent) && hasACMException) ||
                 (!isResult && !isEvent && (hasException || hasError))) {
+            // an error message from the back-end; throw it here
             std::ostringstream out;
             if (isResult) {
                 line = line.substr(7);
@@ -2350,22 +2486,22 @@ static std::string getResult(bool consumeAcks, const std::string& caller) {
                 << std::endl << line;
             error(out.str());
         } else if (isResult) {
-            if (!(consumeAcks && isAck)) {
-                // this is just an acknowledgment of some previous event;
-                // not a real result of its own
-                return line.substr(7);
+            // a regular result
+            if (!isAck || !consumeAcks) {
+                std::string result = line.substr(7);
+#ifdef PIPE_DEBUG
+        fprintf(stderr, "getResult(): returning regular result (length %ld): \"%s\"\n", result.length(), result.c_str());  fflush(stderr);
+#endif
+                return result;
+            } else {
+                // else this is just an acknowledgment of some previous event;
+                // not a real result of its own. consume it and keep waiting
+#ifdef PIPE_DEBUG
+        fprintf(stderr, "getResult(): saw ACK (length %ld): \"%s\"\n", line.length(), line.c_str());  fflush(stderr);
+#endif
             }
-        } else if (isResultLong) {
-            // read a 'long' result (more than ~4096 chars; sent across multiple lines)
-            std::ostringstream os;
-            // os << line.substr(17);   // don't add first line "result_long:begin"
-            std::string nextLine = getPipe();
-            while (nextLine != "result_long:end") {
-                os << nextLine;
-                nextLine = getPipe();
-            }
-            return os.str();
         } else if (isEvent) {
+            // a Java-originated event; enqueue it to process here
             GEvent event = parseEvent(line.substr(6));
             eventQueue.enqueue(event);
             if (event.getEventClass() == WINDOW_EVENT && event.getEventType() == CONSOLE_CLOSED
@@ -2374,7 +2510,9 @@ static std::string getResult(bool consumeAcks, const std::string& caller) {
             }
         } else {
             if (line.find("\tat ") != std::string::npos || line.find("   at ") != std::string::npos) {
-                // part of a Java exception stack trace, so echo it
+                // a line from a back-end Java exception stack trace;
+                // shouldn't really be happening, but back end isn't perfect.
+                // echo it here to STDERR so C++ user can see it to help diagnose the issue
                 fprintf(stderr, "%s\n", line.c_str());
                 fflush(stderr);
             }
@@ -2382,6 +2520,17 @@ static std::string getResult(bool consumeAcks, const std::string& caller) {
     }
 }
 
+/*
+ * Returns the full path to the java (Linux/Mac) or java.exe (Windows)
+ * executable to be executed to launch the Java back-end.
+ * If the JAVA_HOME environment variable has been set, looks there first
+ * for the java executable.
+ * If found, returns the one from JAVA_HOME.
+ * Otherwise simply returns the string "java" and relies on this being found
+ * in the system's execution path.
+ * Setting JAVA_HOME can help disambiguate between multiple versions of Java
+ * that might be found on the same machine.
+ */
 static std::string getJavaCommand() {
     static std::string DEFAULT_JAVA_COMMAND = "java";
     char* JAVA_HOME = getenv("JAVA_HOME");
@@ -2440,6 +2589,12 @@ static GEvent parseEvent(std::string line) {
         return parseKeyEvent(scanner, KEY_TYPED);
     } else if (name == "actionPerformed") {
         return parseActionEvent(scanner, ACTION_PERFORMED);
+    } else if (name == "serverRequest") {
+        return parseServerEvent(scanner, SERVER_REQUEST);
+    } else if (name == "tableSelected") {
+        return parseTableEvent(scanner, TABLE_SELECTED);
+    } else if (name == "tableUpdated") {
+        return parseTableEvent(scanner, TABLE_UPDATED);
     } else if (name == "timerTicked") {
         return parseTimerEvent(scanner, TIMER_TICKED);
     } else if (name == "windowClosed") {
@@ -2470,7 +2625,7 @@ static GEvent parseEvent(std::string line) {
             // if waiting for keyboard input, abort it
             if (cinout_new_buf && cinout_new_buf->isBlocked()) {
                 // abortAllConsoleIO();
-                exit(0);
+                std::exit(0);
             }
 
             // close any other graphical windows and exit program
@@ -2482,9 +2637,9 @@ static GEvent parseEvent(std::string line) {
         }
 #endif // SPL_DISABLE_GRAPHICAL_CONSOLE
     } else if (name == "lastWindowClosed") {
-        exit(0);
+        std::exit(0);
     } else if (name == "lastWindowGWindow_closed") {
-        exit(0);
+        std::exit(0);
     } else {
         /* Ignore for now */
     }
@@ -2517,13 +2672,51 @@ static GEvent parseKeyEvent(TokenScanner& scanner, EventType type) {
     scanner.verifyToken(",");
     int modifiers = scanInt(scanner);
     scanner.verifyToken(",");
-    int keyChar = scanInt(scanner);
+    int keyChar = scanChar(scanner);   // BUGFIX 2016/01/27: Thanks to K. Perry
     scanner.verifyToken(",");
     int keyCode = scanInt(scanner);
     scanner.verifyToken(")");
     GKeyEvent e(type, GWindow(windowTable.get(id)), char(keyChar), keyCode);
     e.setEventTime(time);
     e.setModifiers(modifiers);
+    return e;
+}
+
+static GEvent parseServerEvent(TokenScanner& scanner, EventType type) {
+    scanner.verifyToken("(");
+    double time = scanDouble(scanner);
+    scanner.verifyToken(",");
+    int requestID = scanInt(scanner);
+    scanner.verifyToken(",");
+    std::string requestUrl = urlDecode(scanner.getStringValue(scanner.nextToken()));
+    scanner.verifyToken(")");
+
+    GServerEvent e(type, requestID, requestUrl);
+    e.setEventTime(time);
+    return e;
+}
+
+static GEvent parseTableEvent(TokenScanner& scanner, EventType type) {
+    scanner.verifyToken("(");
+    std::string id = scanner.getStringValue(scanner.nextToken());
+    scanner.verifyToken(",");
+    double time = scanDouble(scanner);
+    scanner.verifyToken(",");
+    int row = scanInt(scanner);
+    scanner.verifyToken(",");
+    int col = scanInt(scanner);
+    std::string value;
+
+    if (type == TABLE_UPDATED) {
+        scanner.verifyToken(",");
+        value = urlDecode(scanner.getStringValue(scanner.nextToken()));
+    }
+    scanner.verifyToken(")");
+    
+    GTableEvent e(type);  //, GTimer(timerTable.get(id)));
+    e.setLocation(row, col);
+    e.setValue(value);
+    e.setEventTime(time);
     return e;
 }
 
@@ -2859,6 +3052,12 @@ static void echoConsole(const std::string&, bool) {
 static void endLineConsole(bool isStderr) {
     putPipe("JBEConsole.println()");
     echoConsole("\n", isStderr);
+}
+
+static int scanChar(TokenScanner& scanner) {
+    std::string token = scanner.nextToken();
+    if (token == "-") token += scanner.nextToken();
+    return stringToChar(token);
 }
 
 static int scanInt(TokenScanner& scanner) {

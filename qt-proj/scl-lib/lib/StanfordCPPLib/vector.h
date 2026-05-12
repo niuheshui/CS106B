@@ -4,6 +4,15 @@
  * This file exports the <code>Vector</code> class, which provides an
  * efficient, safe, convenient replacement for the array type in C++.
  *
+ * @version 2016/08/12
+ * - bug fix for constructor based on initializer list
+ * @version 2016/08/10
+ * - added support for std initializer_list usage, such as {1, 2, 3}
+ *   in constructor, addAll, +, +=
+ * @version 2016/08/04
+ * - fixed operator >> to not throw errors
+ * @version 2015/10/13
+ * - nulled out pointer fields in destructor after deletion to avoid double-free
  * @version 2015/07/05
  * - using global hashing functions rather than global variables
  * @version 2014/11/13
@@ -23,8 +32,9 @@
 #ifndef _vector_h
 #define _vector_h
 
-#include <iterator>
+#include <initializer_list>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -59,7 +69,17 @@ public:
      */
     Vector();
     explicit Vector(int n, ValueType value = ValueType());
+
+    /*
+     * This constructor copies an STL vector.
+     */
     /* implicit */ Vector(const std::vector<ValueType>& v);
+
+    /*
+     * This constructor uses an initializer list to set up the vector.
+     * Usage: Vector<int> vec {1, 2, 3};
+     */
+    Vector(std::initializer_list<ValueType> list);
 
     /*
      * Destructor: ~Vector
@@ -81,10 +101,12 @@ public:
      * Usage: vec.addAll(v2);
      * ----------------------
      * Adds all elements of the given other vector to this vector.
+     * You may also pass an initializer list such as {1, 2, 3}.
      * Returns a reference to this vector.
      * Identical in behavior to the += operator.
      */
     Vector<ValueType>& addAll(const Vector<ValueType>& v);
+    Vector<ValueType>& addAll(std::initializer_list<ValueType> list);
 
     /*
      * Method: clear
@@ -94,6 +116,15 @@ public:
      */
     void clear();
     
+    /*
+     * Method: ensureCapacity
+     * Usage: vec.ensureCapacity(n);
+     * -----------------------------
+     * Guarantees that the vector's internal array is at least the given length.
+     * If necessary, resizes the array to be the given length or larger.
+     */
+    void ensureCapacity(int cap);
+
     /*
      * Method: equals
      * Usage: if (vec.equals(v2)) ...
@@ -226,9 +257,11 @@ public:
      * Operator: +
      * Usage: v1 + v2
      * --------------
-     * Concatenates two vectors.
+     * Concatenates two vectors, or concatenates this vector with an
+     * initializer list such as {1, 2, 3}.
      */
     Vector operator +(const Vector& v2) const;
+    Vector operator +(std::initializer_list<ValueType> list) const;
 
     /*
      * Operator: +=
@@ -236,9 +269,10 @@ public:
      *        v1 += value;
      * -------------------
      * Adds all of the elements from <code>v2</code> (or the single
-     * specified value) to <code>v1</code>.  As a convenience, the
-     * <code>Vector</code> package also overloads the comma operator so
-     * that it is possible to initialize a vector like this:
+     * specified value) to <code>v1</code>.
+     * You can also pass an initializer list such as {1, 2, 3}.
+     * As a convenience, the <code>Vector</code> package also overloads the
+     * comma operator so that it is possible to initialize a vector like this:
      *
      *<pre>
      *    Vector&lt;int&gt; digits;
@@ -246,6 +280,7 @@ public:
      *</pre>
      */
     Vector& operator +=(const Vector& v2);
+    Vector& operator +=(std::initializer_list<ValueType> list);
     Vector& operator +=(const ValueType& value);
 
 
@@ -523,6 +558,14 @@ Vector<ValueType>::Vector(const std::vector<ValueType>& v) {
     }
 }
 
+template <typename ValueType>
+Vector<ValueType>::Vector(std::initializer_list<ValueType> list) {
+    capacity = list.size();
+    count = 0;
+    elements = new ValueType[capacity];
+    addAll(list);
+}
+
 /*
  * Implementation notes: copy constructor and assignment operator
  * --------------------------------------------------------------
@@ -538,6 +581,7 @@ template <typename ValueType>
 Vector<ValueType>::~Vector() {
     if (elements != NULL) {
         delete[] elements;
+        elements = NULL;
     }
 }
 
@@ -554,10 +598,18 @@ void Vector<ValueType>::add(const ValueType& value) {
 
 template <typename ValueType>
 Vector<ValueType>& Vector<ValueType>::addAll(const Vector<ValueType>& v) {
-    for (ValueType value : v) {
+    for (const ValueType& value : v) {
         add(value);
     }
     return *this;   // BUGFIX 2014/04/27
+}
+
+template <typename ValueType>
+Vector<ValueType>& Vector<ValueType>::addAll(std::initializer_list<ValueType> list) {
+    for (const ValueType& value : list) {
+        add(value);
+    }
+    return *this;
 }
 
 template <typename ValueType>
@@ -569,16 +621,34 @@ void Vector<ValueType>::clear() {
     elements = NULL;
 }
 
+// implementation note: This method is public so clients can guarantee a given
+// capacity.  Internal resizing is automatically done by expandCapacity.
+// See also: expandCapacity
+template <typename ValueType>
+void Vector<ValueType>::ensureCapacity(int cap) {
+    if (cap >= 1 && capacity < cap) {
+        capacity = std::max(cap, capacity * 2);
+        ValueType* array = new ValueType[capacity];
+        if (elements != NULL) {
+            for (int i = 0; i < count; i++) {
+                array[i] = elements[i];
+            }
+            delete[] elements;
+        }
+        elements = array;
+    }
+}
+
 template <typename ValueType>
 bool Vector<ValueType>::equals(const Vector<ValueType>& v) const {
     if (this == &v) {
-		return true;
-	}
-	if (size() != v.size()) {
+        return true;
+    }
+    if (size() != v.size()) {
         return false;
     }
     for (int i = 0, sz = size(); i < sz; i++) {
-        if (get(i) != v.get(i)) {
+        if (elements[i] != v.elements[i]) {
             return false;
         }
     }
@@ -590,15 +660,18 @@ bool Vector<ValueType>::equals(const Vector<ValueType>& v) const {
  * ------------------------------------
  * This function doubles the array capacity, copies the old elements
  * into the new array, and then frees the old one.
+ * See also: ensureCapacity
  */
 template <typename ValueType>
 void Vector<ValueType>::expandCapacity() {
     capacity = std::max(1, capacity * 2);
     ValueType *array = new ValueType[capacity];
-    for (int i = 0; i < count; i++) {
-        array[i] = elements[i];
+    if (elements != NULL) {
+        for (int i = 0; i < count; i++) {
+            array[i] = elements[i];
+        }
+        delete[] elements;
     }
-    if (elements != NULL) delete[] elements;
     elements = array;
 }
 
@@ -618,7 +691,9 @@ const ValueType& Vector<ValueType>::get(int index) const {
 template <typename ValueType>
 void Vector<ValueType>::insert(int index, const ValueType& value) {
     checkIndex(index, 0, count, "insert");
-    if (count == capacity) expandCapacity();
+    if (count == capacity) {
+        expandCapacity();
+    }
     for (int i = count; i > index; i--) {
         elements[i] = elements[i - 1];
     }
@@ -738,8 +813,19 @@ Vector<ValueType> Vector<ValueType>::operator +(const Vector& v2) const {
 }
 
 template <typename ValueType>
+Vector<ValueType> Vector<ValueType>::operator +(std::initializer_list<ValueType> list) const {
+    Vector<ValueType> result = *this;
+    return result.addAll(list);
+}
+
+template <typename ValueType>
 Vector<ValueType>& Vector<ValueType>::operator +=(const Vector& v2) {
     return addAll(v2);
+}
+
+template <typename ValueType>
+Vector<ValueType>& Vector<ValueType>::operator +=(std::initializer_list<ValueType> list) {
+    return addAll(list);
 }
 
 template <typename ValueType>
@@ -857,7 +943,11 @@ std::istream& operator >>(std::istream& is, Vector<ValueType>& vec) {
     char ch = '\0';
     is >> ch;
     if (ch != '{') {
+#ifdef SPL_ERROR_ON_COLLECTION_PARSE
         error("Vector::operator >>: Missing {");
+#endif
+        is.setstate(std::ios_base::failbit);
+        return is;
     }
     vec.clear();
     is >> ch;
@@ -865,13 +955,24 @@ std::istream& operator >>(std::istream& is, Vector<ValueType>& vec) {
         is.unget();
         while (true) {
             ValueType value;
-            readGenericValue(is, value);
+            if (!readGenericValue(is, value)) {
+#ifdef SPL_ERROR_ON_COLLECTION_PARSE
+                error("Vector::operator >>: parse error");
+#endif
+                return is;
+            }
             vec += value;
-            is >> ch;
+            if (!(is >> ch)) {
+                break;
+            }
             if (ch == '}') {
                 break;
             } else if (ch != ',') {
+#ifdef SPL_ERROR_ON_COLLECTION_PARSE
                 error(std::string("Vector::operator >>: Unexpected character ") + ch);
+#endif
+                is.setstate(std::ios_base::failbit);
+                return is;
             }
         }
     }

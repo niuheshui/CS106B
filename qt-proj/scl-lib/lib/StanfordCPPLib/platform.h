@@ -5,6 +5,11 @@
  * the platform-specific parts of the StanfordCPPLib package.  This file is
  * logically part of the implementation and is not interesting to clients.
  *
+ * @version 2016/08/02
+ * - added DiffImage methods
+ * - added GWindow savePixels method
+ * @version 2015/11/07
+ * - added GTable back-end methods
  * @version 2014/11/20
  * - added gwindow clearCanvas method
  * @version 2014/11/15
@@ -59,6 +64,9 @@ public:
     std::string cpplib_getCppLibraryVersion();
     std::string cpplib_getJavaBackEndVersion();
     void cpplib_setCppLibraryVersion();
+    void diffimage_compareImages(const std::string& file1, const std::string& file2, const std::string& outfile);
+    void diffimage_compareWindowToImage(const GWindow& gwindow, const std::string& file2);
+    void diffimage_show(const std::string& file1, const std::string& file2);
     std::string file_openFileDialog(std::string title, std::string mode, std::string path);
     void filelib_createDirectory(std::string path);
     std::string filelib_expandPathname(std::string filename);
@@ -104,6 +112,7 @@ public:
     GDimension ginteractor_getSize(GObject* gobj);
     bool ginteractor_isEnabled(GObject* gint);
     void ginteractor_setActionCommand(GObject* gobj, std::string cmd);
+    void ginteractor_setBackground(GObject* gobj, std::string color);
     void ginteractor_setEnabled(GObject* gint, bool value);
     void ginteractor_setIcon(GObject* gobj, std::string filename);
     void ginteractor_setTextPosition(GObject* gobj, int horizontal, int vertical);
@@ -163,6 +172,19 @@ public:
     void gslider_setPaintTicks(GObject* gobj, bool value);
     void gslider_setSnapToTicks(GObject* gobj, bool value);
     void gslider_setValue(GObject* gobj, int value);
+    void gtable_clear(GObject* gobj);
+    void gtable_constructor(GObject* gobj, int numRows, int numCols, double x, double y, double width, double height);
+    std::string gtable_get(const GObject* gobj, int row, int column);
+    int gtable_getColumnWidth(const GObject* gobj, int column);
+    void gtable_getSelection(const GObject* gobj, int& row, int& column);
+    void gtable_resize(GObject* gobj, int numRows, int numCols);
+    void gtable_select(GObject* gobj, int row, int column);
+    void gtable_set(GObject* gobj, int row, int column, const std::string& value);
+    void gtable_setColumnWidth(GObject* gobj, int column, int width);
+    void gtable_setEditable(GObject* gobj, bool editable);
+    void gtable_setEventEnabled(GObject* gobj, int type, bool enabled);
+    void gtable_setFont(GObject* gobj, const std::string& font);
+    void gtable_setHorizontalAlignment(GObject* gobj, const std::string& alignment);
     void gtextfield_constructor(GObject* gobj, int nChars);
     std::string gtextfield_getText(GObject* gobj);
     bool gtextfield_isEditable(const GObject* gobj);
@@ -173,7 +195,7 @@ public:
     void gtimer_pause(double milliseconds);
     void gtimer_start(const GTimer& timer);
     void gtimer_stop(const GTimer& timer);
-    void gwindow_addToRegion(const GWindow& gw, GObject* gobj, std::string region);
+    void gwindow_addToRegion(const GWindow& gw, GObject* gobj, const std::string& region);
     void gwindow_clear(const GWindow& gw);
     void gwindow_clearCanvas(const GWindow& gw);
     void gwindow_close(const GWindow& gw);
@@ -195,6 +217,7 @@ public:
     void gwindow_removeFromRegion(const GWindow& gw, GObject* gobj, std::string region);
     void gwindow_repaint(const GWindow& gw);
     void gwindow_requestFocus(const GWindow& gw);
+    void gwindow_saveCanvasPixels(const GWindow& gw, const std::string& filename);
     void gwindow_setCanvasSize(const GWindow& gw, int width, int height);
     void gwindow_setExitOnClose(const GWindow& gw, bool value);
     void gwindow_setLocation(const GWindow& gw, int x, int y);
@@ -205,6 +228,10 @@ public:
     void gwindow_setTitle(const GWindow& gw, std::string title);
     void gwindow_setVisible(const GWindow& gw, bool flag);
     void gwindow_toFront(const GWindow& gw);
+    void httpserver_sendResponse(int requestID, int httpErrorCode, const std::string& contentType, const std::string& responseText);
+    void httpserver_sendResponseFile(int requestID, const std::string& contentType, const std::string& responseFile);
+    void httpserver_start(int port);
+    void httpserver_stop();
     void jbeconsole_clear();
     bool jbeconsole_isBlocked();
     void jbeconsole_minimize();

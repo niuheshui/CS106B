@@ -5,6 +5,8 @@
  * provided in the Java Swing libraries.
  * <include src="pictures/ClassHierarchies/GInteractorHierarchy-h.html">
  * 
+ * @version 2016/07/07
+ * - added getText method to GButton, GCheckBox, GRadioButton
  * @version 2015/06/20
  * - added GRadioButton class
  * @version 2014/10/31
@@ -79,6 +81,12 @@ public:
      * Interactors are enabled by default when first created.
      */
     bool isEnabled();
+    
+    /*
+     * See GObject::setColor.
+     */
+    void setBackground(int rgb);
+    void setBackground(std::string color);
 
     /*
      * Sets the interactor to be enabled (true) or disabled (false).
@@ -98,6 +106,9 @@ public:
     void setBounds(const GRectangle& size);
     void setBounds(double x, double y, double width, double height);
     
+    /*
+     * Methods related to get/setting icons on graphical interactors.
+     */
     virtual std::string getIcon() const;
     virtual void setIcon(std::string filename);
     virtual void setTextPosition(SwingConstants horizontal, SwingConstants vertical);
@@ -148,6 +159,11 @@ public:
      */
     GButton(std::string label);
 
+    /*
+     * Returns the text label showing on the button.
+     */
+    virtual std::string getText() const;
+
     /* Prototypes for the virtual methods */
     virtual std::string getType() const;
     virtual std::string toString() const;
@@ -178,6 +194,11 @@ public:
      * an action command.
      */
     GCheckBox(std::string label);
+
+    /*
+     * Returns the text label showing on the button.
+     */
+    virtual std::string getText() const;
 
     /*
      * Method: setSelected
@@ -226,6 +247,11 @@ public:
      * Button is not initially selected unless 'selected' of true is passed.
      */
     GRadioButton(std::string label, std::string group = "default", bool selected = false);
+
+    /*
+     * Returns the text label showing on the button.
+     */
+    virtual std::string getText() const;
 
     /*
      * Method: setSelected

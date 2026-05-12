@@ -2,8 +2,16 @@
  * File: gbufferedimage.h
  * ----------------------
  * This file exports the GBufferedImage class for per-pixel graphics.
+ * See gbufferedimage.cpp for implementation of each member.
  *
  * @author Marty Stepp
+ * @version 2016/07/30
+ * - added constructor that takes a file name
+ * - converted all occurrences of string parameters to const string&
+ * - added operators ==, !=
+ * @version 2015/10/08
+ * - bug fixes and refactoring for pixel-based functions such as fromGrid, load
+ *   to help fix bugs with Base64 encoding/decoding
  * @version 2015/08/12
  * - added toGrid, fromGrid, createRgbPixel, getRed, getGreen, getBlue functions
  * - perf.optimizations to per-pixel stuff; now almost tolerable speed
@@ -68,14 +76,20 @@
  * individual pixels and rectangular regions.
  * If you want to draw shapes and lines, use other classes from this library
  * such as GRect, GLine, and so on.
-</p>
-
-<p class="since">
-    Available since: 2014/08/04 version of C++ library
-</p>
+ * </p>
+ * 
+ * <p class="since">
+ *     Available since: 2014/08/04 version of C++ library
+ * </p>
  */
 class GBufferedImage : public GInteractor {
 public:
+    /*
+     * Largest value that an image's width and/or height can have.
+     * Error will be thrown if you try to make/resize an image larger than this.
+     */
+    static const int WIDTH_HEIGHT_MAX;
+    
     /*
      * Creates a single RGB integer from the given R-G-B components from 0-255.
      */
@@ -108,6 +122,7 @@ public:
     /*
      * Constructs an image with the specified location, size, and optional
      * background color.
+     * You can also pass a filename instead to read the image from that file.
      * If no size is passed, the default size of 0x0 pixels is used.
      * If no location is passed, the default of (x=0, y=0) is used.
      * If no background color is passed, the default of black (0x0) is used.
@@ -115,12 +130,13 @@ public:
      * Throws an error if the given rgb value is invalid or out of range.
      */
     GBufferedImage();
+    GBufferedImage(const std::string& filename);
     GBufferedImage(double width, double height,
                    int rgbBackground = 0x000000);
     GBufferedImage(double x, double y, double width, double height,
                    int rgbBackground = 0x000000);
     GBufferedImage(double x, double y, double width, double height,
-                   std::string rgbBackground);
+                   const std::string& rgbBackground);
     
     /* Prototypes for the virtual methods */
     virtual GRectangle getBounds() const;
@@ -154,7 +170,7 @@ public:
      * Throws an error if the given rgb value is not a valid color.
      */
     void fill(int rgb);
-    void fill(std::string rgb);
+    void fill(const std::string& rgb);
 
     /*
      * Sets the color of every pixel in the given rectangular range of the image
@@ -167,7 +183,7 @@ public:
      */
     void fillRegion(double x, double y, double width, double height, int rgb);
     void fillRegion(double x, double y, double width, double height,
-                    std::string rgb);
+                    const std::string& rgb);
     
     /*
      * Replaces the entire contents of this image with the contents of the
@@ -245,7 +261,7 @@ public:
      * Throws an error if the given rgb value is not a valid color.
      */
     void setRGB(double x, double y, int rgb);
-    void setRGB(double x, double y, std::string rgb);
+    void setRGB(double x, double y, const std::string& rgb);
     
     /*
      * Converts this image into a grid of RGB pixels.
@@ -266,22 +282,29 @@ private:
     /*
      * Throws an error if the given rgb value is not a valid color.
      */
-    void checkColor(std::string member, int rgb) const;
+    void checkColor(const std::string& member, int rgb) const;
 
     /*
      * Throws an error if the given x/y values are out of bounds.
      */
-    void checkIndex(std::string member, double x, double y) const;
+    void checkIndex(const std::string& member, double x, double y) const;
 
     /*
      * Throws an error if the given width/height values are out of bounds.
      */
-    void checkSize(std::string member, double width, double height) const;
+    void checkSize(const std::string& member, double width, double height) const;
 
     /*
      * Initializes private member variables; called by all constructors.
      */
     void init(double x, double y, double width, double height, int rgb);
+
+    // allow operators to see private data inside image
+    friend bool operator ==(const GBufferedImage& img1, const GBufferedImage& img2);
+    friend bool operator !=(const GBufferedImage& img1, const GBufferedImage& img2);
 };
+
+bool operator ==(const GBufferedImage& img1, const GBufferedImage& img2);
+bool operator !=(const GBufferedImage& img1, const GBufferedImage& img2);
 
 #endif

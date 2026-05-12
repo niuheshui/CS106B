@@ -27,6 +27,7 @@
 #include <string>
 #include <cctype>
 #include "error.h"
+#include "gtable.h"
 #include "gtimer.h"
 #include "gtypes.h"
 #include "map.h"
@@ -337,6 +338,108 @@ GTimer GTimerEvent::getGTimer() const {
 std::string GTimerEvent::toString() const {
     if (!valid) return "GTimerEvent(?)";
     return "GTimerEvent:TIMER_TICKED()";
+}
+
+/* Table events */
+
+GTableEvent::GTableEvent() {
+    valid = false;
+}
+
+GTableEvent::GTableEvent(GEvent e) {
+    valid = e.valid && e.eventClass == TABLE_EVENT;
+    if (valid) {
+        eventClass = e.eventClass;
+        eventType = e.eventType;
+        modifiers = e.modifiers;
+        eventTime = e.eventTime;
+        row = e.row;
+        column = e.column;
+        value = e.value;
+    }
+}
+
+GTableEvent::GTableEvent(EventType type) {
+    this->eventClass = TABLE_EVENT;
+    this->eventType = int(type);
+    valid = true;
+}
+
+int GTableEvent::getColumn() const {
+    return column;
+}
+
+int GTableEvent::getRow() const {
+    return row;
+}
+
+std::string GTableEvent::getValue() const {
+    return value;
+}
+
+void GTableEvent::setLocation(int row, int column) {
+    this->row = row;
+    this->column = column;
+}
+
+void GTableEvent::setValue(std::string value) {
+    this->value = value;
+}
+
+std::string GTableEvent::toString() const {
+    if (!valid) return "GTableEvent(?)";
+    std::ostringstream out;
+    if (eventType == TABLE_UPDATED) {
+        out << "GTableEvent:TABLE_UPDATED(r"
+            << row << "c" << column << " \"" << value << "\")";
+    } else if (eventType == TABLE_SELECTED) {
+        out << "GTableEvent:TABLE_SELECTED(r"
+            << row << "c" << column << ")";
+    }
+    return out.str();
+}
+
+GServerEvent::GServerEvent(EventType type, int requestID, const std::string& requestUrl) {
+    this->eventClass = SERVER_EVENT;
+    this->eventType = int(type);
+    this->requestID = requestID;
+    this->requestUrl = requestUrl;
+    valid = true;
+}
+
+int GServerEvent::getRequestID() const {
+    return requestID;
+}
+
+std::string GServerEvent::getRequestURL() const {
+    return requestUrl;
+}
+
+std::string GServerEvent::toString() const {
+    if (!valid) return "GServerEvent(?)";
+    std::ostringstream out;
+    if (eventType == SERVER_REQUEST) {
+        out << "GServerEvent:SERVER_REQUEST(id="
+            << requestID << " url=\"" << requestUrl << "\")";
+    }
+    return out.str();
+}
+
+GServerEvent::GServerEvent() {
+    valid = false;
+}
+
+GServerEvent::GServerEvent(GEvent e) {
+    valid = e.valid && e.eventClass == SERVER_EVENT;
+    if (valid) {
+        eventClass = e.eventClass;
+        eventType = e.eventType;
+        modifiers = e.modifiers;
+        eventTime = e.eventTime;
+        requestID = e.requestID;
+        requestUrl = e.requestUrl;
+        value = e.value;
+    }
 }
 
 /* Global event handlers */
