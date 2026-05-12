@@ -1,6 +1,7 @@
 // Your first program!
 
 #include <iostream>
+#include "console.h"
 #include "vector.h"
 
 using namespace std;
