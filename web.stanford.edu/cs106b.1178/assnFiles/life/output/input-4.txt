@@ -1,0 +1,13 @@
+spiral.txt
+n
+t
+t
+t
+t
+t
+t
+t
+t
+t
+t
+q

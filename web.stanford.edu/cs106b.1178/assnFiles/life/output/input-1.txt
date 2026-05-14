@@ -1,0 +1,6 @@
+simple.txt
+n
+t
+t
+t
+q
