@@ -11,13 +11,14 @@
 // #include "gwindow.h"
 #include "simpio.h"
 #include "strlib.h"
-// #include "lifegui.h"
+#include "lifegui.h"
 using namespace std;
 
-const int MAX_SIZE = 10;
+const int MAX_SIZE = 100;
 void printHelloMessage();
 void initGrid(Grid<int>& grid);
 void printGrid(Grid<int>& grid);
+void printGrid(Grid<int>& grid, LifeGUI& g);
 void step(Grid<int>& grid, bool enableWrapping);
 
 int main() {
@@ -27,10 +28,13 @@ int main() {
     printHelloMessage();
 
     Grid<int> grid;
+    LifeGUI g;
+
     initGrid(grid);
+    g.resize(grid.numRows(), grid.numCols());
     bool enableWrapping = getYesOrNo("Should the simulation wrap around the grid (y/n)?");
 
-    printGrid(grid);
+    printGrid(grid, g);
     bool run = true;
 
     do {
@@ -49,7 +53,7 @@ int main() {
                 cout << "==================== (console cleared) ====================" << endl;
 #endif
                 step(grid, enableWrapping);
-                printGrid(grid);
+                printGrid(grid, g);
 #ifdef _gwindow_h
                 pause(50);
 #endif
@@ -58,7 +62,7 @@ int main() {
         }
         case 't': {
             step(grid, enableWrapping);
-            printGrid(grid);
+            printGrid(grid, g);
             break;
         }
         case 'q':{
@@ -150,6 +154,14 @@ void printGrid(Grid<int>& grid) {
             }
         }
         cout << endl;
+    }
+}
+
+void printGrid(Grid<int>& grid, LifeGUI& g) {
+    for (int i = 0; i < grid.numRows(); ++i) {
+        for (int j = 0; j < grid.numCols(); ++j) {
+            g.drawCell(i, j, grid[i][j]);
+        }
     }
 }
 
