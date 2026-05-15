@@ -4,6 +4,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include "random.h"
 // #include "console.h"
 #include "filelib.h"
 #include "grid.h"
@@ -13,6 +14,7 @@
 // #include "lifegui.h"
 using namespace std;
 
+const int MAX_SIZE = 10;
 void printHelloMessage();
 void initGrid(Grid<int>& grid);
 void printGrid(Grid<int>& grid);
@@ -83,12 +85,7 @@ void printHelloMessage() {
     cout << "- A cell with 4 or more neighbors dies." << endl;
 }
 
-void initGrid(Grid<int>& grid) {
-    ifstream in;
-    while(!openFile(in, getLine("Grid input fileName?"))) {
-        cout << "Unable to open that file.  Try again." << endl;
-    }
-
+void initGrid(Grid<int>& grid, istream& in) {
     string buf;
     getLine(in, buf);
     int nRows = stringToInteger(buf);
@@ -106,7 +103,40 @@ void initGrid(Grid<int>& grid) {
             }
         }
     }
+}
 
+string generateGrid() {
+    ostringstream os;
+    int nRows = randomInteger(1, MAX_SIZE);
+    int nCols = randomInteger(1, MAX_SIZE);
+    os << nRows  << endl;
+    os << nCols << endl;
+
+    for (int i = 0; i < nRows; ++i) {
+        for (int j = 0; j < nCols; ++j) {
+            if (randomBool()) {
+                os << 'X';
+            } else {
+                os << '-';
+            }
+        }
+        os << endl;
+    }
+
+    return os.str();
+}
+
+void initGrid(Grid<int>& grid) {
+    ifstream in;
+    string fileName;
+    while(!openFile(in, (fileName = getLine("Grid input fileName?")))) {
+        if (fileName == "random") {
+            istringstream isn(generateGrid());
+            return initGrid(grid, isn);
+        }
+        cout << "Unable to open that file.  Try again." << endl;
+    }
+    initGrid(grid, in);
     in.close();
 }
 
