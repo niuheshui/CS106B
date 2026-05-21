@@ -18,6 +18,7 @@
 #include <cctype>
 #include <fstream>
 #include <iostream>
+#include "error.h"
 #include <sstream>
 #include <string>
 
@@ -27,6 +28,13 @@ static const std::string GETREAL_DEFAULT_PROMPT = "Enter a number: ";
 static const std::string GETREAL_DEFAULT_REPROMPT = "Illegal numeric format. Try again.";
 static const std::string GETYESORNO_DEFAULT_PROMPT = "Try again: ";
 static const std::string GETYESORNO_DEFAULT_REPROMPT = "Please type a word that starts with 'Y' or 'N'.";
+
+static void _getline(std::istream& input, std::string& out) {
+    if (input.eof()) {
+        error("input stream is eof!");
+    }
+    getline(input, out);
+}
 
 /*
  * Implementation notes: getInteger, getReal
@@ -44,7 +52,7 @@ int getInteger(const std::string& prompt,
     while (true) {
         std::cout << promptCopy;
         std::string line;
-        getline(std::cin, line);
+        _getline(std::cin, line);
         trimInPlace(line);
         std::istringstream stream(line);
         stream >> value;
@@ -79,12 +87,12 @@ void getLine(const std::string& prompt,
     std::string promptCopy = prompt;
     appendSpace(promptCopy);
     std::cout << promptCopy;
-    getline(std::cin, out);
+    _getline(std::cin, out);
 }
 
 void getLine(std::istream& input,
              std::string& out) {
-    getline(input, out);
+    _getline(input, out);
 }
 
 double getReal(const std::string& prompt,
@@ -95,7 +103,7 @@ double getReal(const std::string& prompt,
     while (true) {
         std::cout << promptCopy;
         std::string line;
-        getline(std::cin, line);
+        _getline(std::cin, line);
         trimInPlace(line);
         std::istringstream stream(line);
         stream >> value;
@@ -119,7 +127,7 @@ bool getYesOrNo(const std::string& prompt,
     while (true) {
         std::cout << promptCopy;
         std::string line;
-        getline(std::cin, line);
+        _getline(std::cin, line);
         if (line.empty()) {
             line = defaultValue;
         }
