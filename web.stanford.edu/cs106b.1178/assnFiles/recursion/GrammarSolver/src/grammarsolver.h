@@ -16,18 +16,32 @@
 
 #ifndef _recursionproblems_h
 #define _recursionproblems_h
-// #define TEST
+#define TEST
 
 #include <iostream>
 #include <string>
 // #include "gbufferedimage.h"
 // #include "gwindow.h"
 #include "vector.h"
+#include "hashmap.h"
 
-// function prototype declarations
-// (If you want to declare your own helper function prototypes, do that near
-//  the top of your .cpp file, not here.  You should NOT modify this file.)
-Vector<std::string> grammarGenerate(std::istream& input, std::string symbol, int times);
+class GrammarGenerator {
+public:
+    using Symbol = std::string;
+    using Rule = Vector<Symbol>;
+
+    static GrammarGenerator parse(std::istream& input);
+
+    std::string generate(const Symbol& symbol);
+
+    Vector<std::string> generate(const Symbol& symbol, int times);
+
+private:
+    HashMap<Symbol, Vector<Rule>> grammar;
+
+    const GrammarGenerator::Rule& randomRule(const Vector<Rule>& rules) const;
+};
+
 #endif
 
 /*

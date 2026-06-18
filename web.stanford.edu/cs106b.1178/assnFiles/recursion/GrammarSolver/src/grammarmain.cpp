@@ -41,6 +41,7 @@ int main() {
         std::ifstream input("sentence.txt");
 #endif
 
+        GrammarGenerator g = GrammarGenerator::parse(input);
 
 #ifndef TEST
         // prompt for symbols repeatedly
@@ -59,7 +60,7 @@ int main() {
             std::cout << std::endl;
 
             // call student's grammarGenerate function
-            Vector<std::string> result = grammarGenerate(input, symbol, times);
+            Vector<std::string> result = g.generate(symbol, times);
 
             // print the vector of results
             for (int i = 0; i < result.size(); i++) {

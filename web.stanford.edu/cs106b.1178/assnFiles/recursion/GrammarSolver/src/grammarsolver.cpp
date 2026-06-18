@@ -19,42 +19,9 @@
 
 using namespace std;
 
-namespace {
-
-using Rule = Vector<string>;
-using Rules = Vector<Rule>;
-
-const Rule& randomRule(Rules& rules) {
-    return rules.get(randomInteger(0, rules.size() - 1));
-}
-
-string grammarGenerate(HashMap<string, Rules>& m, string symbol) {
-    if (!m.containsKey(symbol)) {
-        return symbol;
-    }
-    const Rule& rule = randomRule(m[symbol]);
-    string result;
-    for (const string& s : rule) {
-        result += grammarGenerate(m, s) + " ";
-    }
-    return trim(result);
-}
-
-}
-
-/**
- * Generates grammar for a given symbol a certain number of times given
- * a BNF input file.
- *
- * This will be called by grammarmain.cpp.
- *
- * @param input - Input stream of BNF file.
- * @param symbol - Symbol to generate
- * @param times - Number of times grammar is generated
- * @return Vector of strings of size times with random generations of symbol
- */
-Vector<string> grammarGenerate(istream& input, string symbol, int times) {
-    HashMap<string, Rules> m;
+GrammarGenerator GrammarGenerator::parse(istream& input) {
+    GrammarGenerator g;
+    HashMap<string, Vector<GrammarGenerator::Rule>>& m = g.grammar;
     string s;
     while (true) {
         getLine(input, s);
@@ -78,9 +45,32 @@ Vector<string> grammarGenerate(istream& input, string symbol, int times) {
             m[key] += rule;
         }
     }
-    Vector<string> result;
+
+    return g;
+}
+
+const GrammarGenerator::Rule& GrammarGenerator::randomRule(const Vector<Rule>& rules) const {
+    return rules.get(randomInteger(0, rules.size() - 1));
+}
+
+std::string GrammarGenerator::generate(const Symbol& symbol) {
+    if (!this->grammar.containsKey(symbol)) {
+        return symbol;
+    }
+    const Rule& rule = this->randomRule(this->grammar[symbol]);
+    string result;
+    for (const string& s : rule) {
+        result += generate(s) + " ";
+    }
+    return trim(result);
+}
+
+Vector<std::string> GrammarGenerator::generate(const Symbol& symbol, int times) {
+    Vector<std::string> result;
     while (times--) {
-        result.push_back(grammarGenerate(m, symbol));
+        result.push_back(this->generate(symbol));
     }
     return result;
 }
+
+
