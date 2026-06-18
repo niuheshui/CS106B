@@ -38,6 +38,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <utility>
 #include "compare.h"
 #include "error.h"
 #include "hashcode.h"
@@ -95,6 +96,7 @@ public:
      * Adds a new value to the end of this vector.
      */
     void add(const ValueType& value);
+    void add(ValueType&& value);
 
     /*
      * Method: addAll
@@ -154,7 +156,8 @@ public:
      * method signals an error if the index is outside the range from 0
      * up to and including the length of the vector.
      */
-    void insert(int index, const ValueType& value);
+    template <typename T>
+    void insert(int index, T&& value);
 
     /*
      * Method: isEmpty
@@ -186,6 +189,7 @@ public:
      * with the <code>vector</code> class in the Standard Template Library.
      */
     void push_back(const ValueType& value);
+    void push_back(ValueType&& value);
 
     /*
      * Method: remove
@@ -597,6 +601,11 @@ void Vector<ValueType>::add(const ValueType& value) {
 }
 
 template <typename ValueType>
+void Vector<ValueType>::add(ValueType&& value) {
+    insert(count, std::move(value));
+}
+
+template <typename ValueType>
 Vector<ValueType>& Vector<ValueType>::addAll(const Vector<ValueType>& v) {
     for (const ValueType& value : v) {
         add(value);
@@ -668,7 +677,7 @@ void Vector<ValueType>::expandCapacity() {
     ValueType *array = new ValueType[capacity];
     if (elements != NULL) {
         for (int i = 0; i < count; i++) {
-            array[i] = elements[i];
+            array[i] = std::move(elements[i]);
         }
         delete[] elements;
     }
@@ -689,15 +698,16 @@ const ValueType& Vector<ValueType>::get(int index) const {
  * deleted one.
  */
 template <typename ValueType>
-void Vector<ValueType>::insert(int index, const ValueType& value) {
+template <typename T>
+void Vector<ValueType>::insert(int index, T&& value) {
     checkIndex(index, 0, count, "insert");
     if (count == capacity) {
         expandCapacity();
     }
     for (int i = count; i > index; i--) {
-        elements[i] = elements[i - 1];
+        elements[i] = std::move(elements[i - 1]);
     }
-    elements[index] = value;
+    elements[index] = std::forward<T>(value);
     count++;
 }
 
@@ -737,6 +747,11 @@ void Vector<ValueType>::mapAll(FunctorType fn) const {
 template <typename ValueType>
 void Vector<ValueType>::push_back(const ValueType& value) {
     insert(count, value);
+}
+
+template <typename ValueType>
+void Vector<ValueType>::push_back(ValueType&& value) {
+    insert(count, std::move(value));
 }
 
 template <typename ValueType>
